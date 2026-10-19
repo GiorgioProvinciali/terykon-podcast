@@ -16,7 +16,7 @@
 #
 # Secrets (Settings -> Secrets and variables -> Actions; only their names here):
 #   TERYKON_ENGINE_READ       fine-grained personal access token, repository GiorgioProvinciali/terykon-engine only, Contents: Read-only (the tools, the
-#                             corpus branch, the abstracts of the theme). Nothing else.
+#                             corpus branch and who pushed it, the abstracts of the theme). Nothing else.
 #   CLOUDFLARE_PODCAST_TOKEN  Cloudflare API token, Account -> Cloudflare Pages: Edit (the project terykon-podcast). Nothing else.
 # Variable: CLOUDFLARE_ACCOUNT_ID (Settings -> Variables).
 # Triggers: by hand (Actions -> podcast -> Run workflow: mode full for the first round), every night (incremental), or repository_dispatch
@@ -98,6 +98,19 @@ jobs:
         run: |
           echo "engine_sha=$(git -C engine rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "corpus_sha=$(git -C corpus rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      # the review of 19/10/2026, R2: corpus is not signed, and a Write account of terykon-engine could change an article there
+      # and have it voiced and published. The push that made the checked-out tip must be the workflows' (github-actions[bot])
+      # or the owner's, else the round stops here (the make jobs read exactly this corpus_sha). The activity of the branch is
+      # read with TERYKON_ENGINE_READ, which has Contents: read on terykon-engine (enough for GET /activity); the token only
+      # through the environment, never in the script
+      - name: who pushed the corpus (the workflows or the owner, else nothing is voiced)
+        env:
+          GH_TOKEN: ${{ secrets.TERYKON_ENGINE_READ }}
+          CORPUS_SHA: ${{ steps.refs.outputs.corpus_sha }}
+        run: |
+          set -euo pipefail
+          gh api "repos/GiorgioProvinciali/terykon-engine/activity?ref=refs/heads/corpus&per_page=30" > "$RUNNER_TEMP/corpus-activity.json"
+          node engine/cartographic/tools/podcast_corpus_guard.mjs --activity "$RUNNER_TEMP/corpus-activity.json" --sha "$CORPUS_SHA"
       - name: the catalogue (branch catalog of this repository; empty on the first round)
         run: |
           if git fetch -q --depth 1 origin catalog 2>/dev/null; then git show FETCH_HEAD:manifest.jsonl > "$RUNNER_TEMP/known.jsonl"; else : > "$RUNNER_TEMP/known.jsonl"; fi
