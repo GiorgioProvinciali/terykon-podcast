@@ -10,7 +10,8 @@
 #          fp32, checked by SHA-256; never the int8 one), --max-minutes 260 so that the uploads always fit in the 350 minutes; each finished episode goes to
 #          its release (tools/podcast_release.py upload: the row is kept only after the upload), the rows go to an artifact. What does not fit is made by the
 #          next incremental round.
-#   feed   the catalogue (known rows + this round's) committed to the branch `catalog`, then tools/podcast_feed.mjs (feed.xml, cover, index) deployed to the
+#   feed   the catalogue (known rows + this round's) committed to the branch `catalog`, then tools/podcast_feed.mjs (feed.xml, listen-index.json for
+#          terykon.com's Listen player since theme 5.5.1, cover, index) deployed to the
 #          Cloudflare Pages project terykon-podcast (podcast.terykon.com/feed.xml). The enclosures are audio.terykon.com/<year>/terykon-<id>.mp3, the Worker
 #          of terykon-engine cartographic/podcast/worker/ redirecting to the release asset.
 #
@@ -264,10 +265,17 @@ jobs:
           git add manifest.jsonl
           git commit -qm "catalogue: $(grep -c . manifest.jsonl) episodes (run ${GITHUB_RUN_ID}, $MODE)"
           git push -q origin HEAD:catalog
-      - name: the feed
+      # theme 5.5.1 (Giorgio, 20/10/2026): listen-index.json beside feed.xml, read server-side by terykon.com's Listen player
+      # (theme/terykon-safe/inc/terykon-listen.php, hourly); stale.json = podcast_plan.py incremental over the final catalogue: the
+      # episodes whose text is no longer the article's, which keep the time they were made (the theme then reads with the device's voice)
+      - name: the feed and the Listen index
         run: |
+          node engine/cartographic/tools/tts_texts.mjs --corpus corpus/articles.jsonl.gz --out "$RUNNER_TEMP/speak.jsonl" --podcast
+          python3 engine/cartographic/tools/podcast_plan.py --speak "$RUNNER_TEMP/speak.jsonl" --known "$RUNNER_TEMP/manifest.jsonl" --mode incremental \
+            --model "$KOKORO_MODEL" --out "$RUNNER_TEMP/stale.json" > /dev/null
           node engine/cartographic/tools/podcast_feed.mjs --manifest "$RUNNER_TEMP/manifest.jsonl" --corpus corpus/articles.jsonl.gz \
-            --abstracts engine/theme/terykon-safe/data/abstracts --cover engine/cartographic/podcast/feed/cover-3000.jpg --out "$RUNNER_TEMP/site"
+            --abstracts engine/theme/terykon-safe/data/abstracts --cover engine/cartographic/podcast/feed/cover-3000.jpg --out "$RUNNER_TEMP/site" \
+            --stale "$RUNNER_TEMP/stale.json"
       - name: to Cloudflare Pages (project terykon-podcast; wrangler as terykon-engine's package-lock pins it)
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PODCAST_TOKEN }}
