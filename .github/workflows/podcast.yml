@@ -112,6 +112,22 @@ jobs:
           set -euo pipefail
           gh api "repos/GiorgioProvinciali/terykon-engine/activity?ref=refs/heads/corpus&per_page=30" > "$RUNNER_TEMP/corpus-activity.json"
           node engine/cartographic/tools/podcast_corpus_guard.mjs --activity "$RUNNER_TEMP/corpus-activity.json" --sha "$CORPUS_SHA"
+      # the review of 27/10/2026 (admin-3-2): who pushed proves nothing (any workflow of a Write account pushes as github-actions[bot]).
+      # Every writer of corpus signs its commit with Ed25519 (tree and parent); here the tip about to be voiced is verified with the
+      # PUBLIC keys of terykon-engine's main (.github/firma-corpus.json, read through the API: main changes only by the release chain,
+      # whatever engine_ref says). No secret here. Without that file the signature is off (the transition) and the step says so; a
+      # refusal stops the round before anything is read aloud
+      - name: the signature of the corpus (the public keys of terykon-engine's main)
+        env:
+          GH_TOKEN: ${{ secrets.TERYKON_ENGINE_READ }}
+        run: |
+          set -euo pipefail
+          if [ ! -f engine/.github/scripts/firma-corpus.mjs ]; then echo "::notice::firma del corpus: lo strumento non c'e' ancora nel motore"; exit 0; fi
+          state="$RUNNER_TEMP/firma-corpus.json"
+          if ! gh api -H "Accept: application/vnd.github.raw+json" "repos/GiorgioProvinciali/terykon-engine/contents/.github/firma-corpus.json?ref=main" > "$state" 2> "$RUNNER_TEMP/firma-err"; then
+            if grep -q "HTTP 404" "$RUNNER_TEMP/firma-err"; then rm -f "$state"; else echo "::error::firma del corpus: lo stato di main non si legge"; cat "$RUNNER_TEMP/firma-err"; exit 1; fi
+          fi
+          node engine/.github/scripts/firma-corpus.mjs verifica --dir corpus --stato "$state"
       - name: the catalogue (branch catalog of this repository; empty on the first round)
         run: |
           if git fetch -q --depth 1 origin catalog 2>/dev/null; then git show FETCH_HEAD:manifest.jsonl > "$RUNNER_TEMP/known.jsonl"; else : > "$RUNNER_TEMP/known.jsonl"; fi
