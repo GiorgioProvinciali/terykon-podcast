@@ -266,12 +266,19 @@ jobs:
           pattern: rows-*
           path: ${{ runner.temp }}/rows
           merge-multiple: true
+      # 29/10/2026 (Giorgio: «L'audio dell'articolo che ho cancellato oggi cancellalo definitivamente»; «sì procedi con 1-5, sia per bozza
+      # che cestino»): the episodes whose article left the corpus (taken off the site) or is in ritirati.json are deleted from their release
+      # and leave the catalogue, at most 10 at once and never with a corpus of fewer than 500 articles (podcast_release.py prune)
       - name: the catalogue (branch catalog)
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           if git fetch -q --depth 1 origin catalog 2>/dev/null; then git show FETCH_HEAD:manifest.jsonl > "$RUNNER_TEMP/known.jsonl"; else : > "$RUNNER_TEMP/known.jsonl"; fi
           python3 engine/cartographic/tools/podcast_release.py merge --known "$RUNNER_TEMP/known.jsonl" --out "$RUNNER_TEMP/manifest.jsonl" "$RUNNER_TEMP/rows/*.jsonl"
+          python3 engine/cartographic/tools/podcast_release.py prune --manifest "$RUNNER_TEMP/manifest.jsonl" --corpus corpus/articles.jsonl.gz \
+            --withdrawn engine/cartographic/podcast/ritirati.json --out "$RUNNER_TEMP/manifest.jsonl" >> "$GITHUB_STEP_SUMMARY" \
+            || echo "::warning::podcast prune failed: nothing deleted this round (the feed still leaves out what is not in the corpus)"
           if cmp -s "$RUNNER_TEMP/known.jsonl" "$RUNNER_TEMP/manifest.jsonl"; then echo "catalogue unchanged"; exit 0; fi
           mkdir "$RUNNER_TEMP/catalog" && cd "$RUNNER_TEMP/catalog"
           git init -q && git config user.name "terykon-podcast" && git config user.email "actions@users.noreply.github.com"
