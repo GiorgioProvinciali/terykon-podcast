@@ -1,4 +1,4 @@
-# The voice of the Terykon podcast: kokoro-onnx and what it needs, exact versions and SHA-256 of the Linux x86_64 CPython 3.11 wheels
+# Requirements of the podcast, exact versions and SHA-256.
 # (pip install --require-hashes --only-binary :all: -r requirements.txt). Tested on 19/10/2026 with these versions.
 attrs==26.1.0 \
     --hash=sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309

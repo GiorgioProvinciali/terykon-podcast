@@ -1,27 +1,4 @@
-# Terykon podcast — the production of the episodes and of the feed (19/10/2026). Lives in the PUBLIC repository GiorgioProvinciali/terykon-podcast
-# (template kept in terykon-engine: cartographic/podcast/repo/; the repository's README says how it is set up). Public, so that the 20 runners of 4 vCPU are
-# free; nothing private is ever written here: the text of the articles is read from the private repository terykon-engine (branch `corpus`) with a read-only
-# token, and only the MP3s (release assets), the catalogue (branch `catalog`: manifest.jsonl) and the feed (Cloudflare Pages) come out.
-#
-#   plan   the spoken text of every article (tools/tts_texts.mjs --podcast), then tools/podcast_plan.py: full = every article (never 444), newest first;
-#          incremental = only the articles without an episode or whose episode was made from another text (text_sha256 in the catalogue); the slices are
-#          disjoint, balanced by words; the yearly releases are created when missing (episodes-<year>-0/1: the id's parity keeps each one under 1,000 assets).
-#   make   one job per slice (max 20 at once), 4 processes of one core each (tools/podcast_episode.py --threads 1), the FULL Kokoro model (kokoro-v1.0.onnx,
-#          fp32, checked by SHA-256; never the int8 one), --max-minutes 260 so that the uploads always fit in the 350 minutes; each finished episode goes to
-#          its release (tools/podcast_release.py upload: the row is kept only after the upload), the rows go to an artifact. What does not fit is made by the
-#          next incremental round.
-#   feed   the catalogue (known rows + this round's) committed to the branch `catalog`, then tools/podcast_feed.mjs (feed.xml, listen-index.json for
-#          terykon.com's Listen player since theme 5.5.1, cover, index) deployed to the
-#          Cloudflare Pages project terykon-podcast (podcast.terykon.com/feed.xml). The enclosures are audio.terykon.com/<year>/terykon-<id>.mp3, the Worker
-#          of terykon-engine cartographic/podcast/worker/ redirecting to the release asset.
-#
-# Secrets (Settings -> Secrets and variables -> Actions; only their names here):
-#   TERYKON_ENGINE_READ       fine-grained personal access token, repository GiorgioProvinciali/terykon-engine only, Contents: Read-only (the tools, the
-#                             corpus branch and who pushed it, the abstracts of the theme). Nothing else.
-#   CLOUDFLARE_PODCAST_TOKEN  Cloudflare API token, Account -> Cloudflare Pages: Edit (the project terykon-podcast). Nothing else.
-# Variable: CLOUDFLARE_ACCOUNT_ID (Settings -> Variables).
-# Triggers: by hand (Actions -> podcast -> Run workflow: mode full for the first round), every night (incremental), or repository_dispatch
-# "podcast-incremental" (sent after the corpus is refreshed). No pull_request trigger: the secrets never meet code from a fork.
+# Terykon podcast: makes the episodes and the feed.
 name: podcast
 
 on:
@@ -99,11 +76,6 @@ jobs:
         run: |
           echo "engine_sha=$(git -C engine rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "corpus_sha=$(git -C corpus rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      # the review of 19/10/2026, R2: corpus is not signed, and a Write account of terykon-engine could change an article there
-      # and have it voiced and published. The push that made the checked-out tip must be the workflows' (github-actions[bot])
-      # or the owner's, else the round stops here (the make jobs read exactly this corpus_sha). The activity of the branch is
-      # read with TERYKON_ENGINE_READ, which has Contents: read on terykon-engine (enough for GET /activity); the token only
-      # through the environment, never in the script
       - name: who pushed the corpus (the workflows or the owner, else nothing is voiced)
         env:
           GH_TOKEN: ${{ secrets.TERYKON_ENGINE_READ }}
@@ -112,11 +84,6 @@ jobs:
           set -euo pipefail
           gh api "repos/GiorgioProvinciali/terykon-engine/activity?ref=refs/heads/corpus&per_page=30" > "$RUNNER_TEMP/corpus-activity.json"
           node engine/cartographic/tools/podcast_corpus_guard.mjs --activity "$RUNNER_TEMP/corpus-activity.json" --sha "$CORPUS_SHA"
-      # the review of 27/10/2026 (admin-3-2): who pushed proves nothing (any workflow of a Write account pushes as github-actions[bot]).
-      # Every writer of corpus signs its commit with Ed25519 (tree and parent); here the tip about to be voiced is verified with the
-      # PUBLIC keys of terykon-engine's main (.github/firma-corpus.json, read through the API: main changes only by the release chain,
-      # whatever engine_ref says). No secret here. Without that file the signature is off (the transition) and the step says so; a
-      # refusal stops the round before anything is read aloud
       - name: the signature of the corpus (the public keys of terykon-engine's main)
         env:
           GH_TOKEN: ${{ secrets.TERYKON_ENGINE_READ }}
@@ -266,9 +233,6 @@ jobs:
           pattern: rows-*
           path: ${{ runner.temp }}/rows
           merge-multiple: true
-      # 29/10/2026 (Giorgio: «L'audio dell'articolo che ho cancellato oggi cancellalo definitivamente»; «sì procedi con 1-5, sia per bozza
-      # che cestino»): the episodes whose article left the corpus (taken off the site) or is in ritirati.json are deleted from their release
-      # and leave the catalogue, at most 10 at once and never with a corpus of fewer than 500 articles (podcast_release.py prune)
       - name: the catalogue (branch catalog)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -288,9 +252,6 @@ jobs:
           git add manifest.jsonl
           git commit -qm "catalogue: $(grep -c . manifest.jsonl) episodes (run ${GITHUB_RUN_ID}, $MODE)"
           git push -q origin HEAD:catalog
-      # theme 5.5.1 (Giorgio, 20/10/2026): listen-index.json beside feed.xml, read server-side by terykon.com's Listen player
-      # (theme/terykon-safe/inc/terykon-listen.php, hourly); stale.json = podcast_plan.py incremental over the final catalogue: the
-      # episodes whose text is no longer the article's, which keep the time they were made (the theme then reads with the device's voice)
       - name: the feed and the Listen index
         run: |
           node engine/cartographic/tools/tts_texts.mjs --corpus corpus/articles.jsonl.gz --out "$RUNNER_TEMP/speak.jsonl" --podcast
